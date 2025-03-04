@@ -4,9 +4,24 @@ import connectDB from '../../../lib/mongodb';
 import Raffle from '../../../models/Raffle';
 import User from '../../../models/User';
 import Stripe from 'stripe';
+import { Types } from 'mongoose';
+
+interface SoldTicket {
+  number: number;
+  buyer: Types.ObjectId;
+  purchaseDate: Date;
+}
+
+interface RaffleDocument {
+  _id: Types.ObjectId;
+  name: string;
+  status: string;
+  ticketPrice: number;
+  soldTickets: SoldTicket[];
+}
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
+  apiVersion: '2022-11-15',
 });
 
 export default async function handler(
@@ -32,7 +47,7 @@ export default async function handler(
       return res.status(400).json({ message: 'Datos inválidos' });
     }
 
-    const raffle = await Raffle.findById(raffleId);
+    const raffle = await Raffle.findById(raffleId).lean() as RaffleDocument | null;
     if (!raffle) {
       return res.status(404).json({ message: 'Rifa no encontrada' });
     }
@@ -42,8 +57,8 @@ export default async function handler(
     }
 
     // Verificar que los boletos estén disponibles
-    const soldTickets = new Set(raffle.soldTickets.map(t => t.number));
-    const unavailableTickets = tickets.filter(t => soldTickets.has(t));
+    const soldTickets = new Set(raffle.soldTickets.map((ticket: SoldTicket) => ticket.number));
+    const unavailableTickets = tickets.filter((ticketNumber: number) => soldTickets.has(ticketNumber));
     if (unavailableTickets.length > 0) {
       return res.status(400).json({
         message: `Los siguientes boletos ya no están disponibles: ${unavailableTickets.join(', ')}`,

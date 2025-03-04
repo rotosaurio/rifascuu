@@ -3,9 +3,16 @@ import Stripe from 'stripe';
 import connectDB from '../../../lib/mongodb';
 import Raffle from '../../../models/Raffle';
 import User from '../../../models/User';
+import { Types } from 'mongoose';
+
+interface SoldTicket {
+  number: number;
+  buyer: Types.ObjectId;
+  purchaseDate: Date;
+}
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
+  apiVersion: '2022-11-15',
 });
 
 export default async function handler(
@@ -40,8 +47,8 @@ export default async function handler(
       return res.status(404).json({ message: 'Rifa no encontrada' });
     }
 
-    const soldTickets = new Set(raffle.soldTickets.map(t => t.number));
-    const unavailableTickets = ticketNumbers.filter(t => soldTickets.has(t));
+    const soldTickets = new Set(raffle.soldTickets.map((ticket: SoldTicket) => ticket.number));
+    const unavailableTickets = ticketNumbers.filter((ticketNumber: number) => soldTickets.has(ticketNumber));
 
     if (unavailableTickets.length > 0) {
       return res.status(400).json({
@@ -54,7 +61,7 @@ export default async function handler(
     await Raffle.findByIdAndUpdate(raffleId, {
       $push: {
         soldTickets: {
-          $each: ticketNumbers.map(number => ({
+          $each: ticketNumbers.map((number: number) => ({
             number,
             buyer: userId,
             purchaseDate: new Date(),

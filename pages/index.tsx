@@ -215,7 +215,7 @@ export default function Home() {
                 >
                   <div className="aspect-w-16 aspect-h-9 bg-gradient-to-br from-yellow-400/20 to-pink-600/20">
                     {raffle.images && raffle.images[0] && (
-                      <Image
+          <Image
                         src={raffle.images[0]}
                         alt={raffle.name}
                         fill
