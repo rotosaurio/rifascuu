@@ -1,10 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Set default background color */
+  --background-color: #f8fafc;
+  --text-color: #1e293b;
+  --primary-color: #2563eb;
+  --secondary-color: #22c55e;
+  --accent-color: #f59e0b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -14,10 +20,68 @@
   }
 }
 
+/* Ensure consistent styling */
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', sans-serif;
+  background-color: var(--background-color);
+  color: var(--text-color);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 600;
+}
+
+/* Common button styles */
+.btn {
+  @apply inline-flex items-center justify-center px-4 py-2 border border-transparent 
+         text-sm font-medium rounded-md shadow-sm transition-all duration-200 focus:outline-none;
+}
+
+.btn-primary {
+  @apply bg-blue-600 text-white hover:bg-blue-700 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
+}
+
+.btn-secondary {
+  @apply bg-green-600 text-white hover:bg-green-700 focus:ring-2 focus:ring-offset-2 focus:ring-green-500;
+}
+
+.btn-danger {
+  @apply bg-red-600 text-white hover:bg-red-700 focus:ring-2 focus:ring-offset-2 focus:ring-red-500;
+}
+
+.btn-outline {
+  @apply border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
+}
+
+/* Card styles */
+.card {
+  @apply bg-white rounded-lg shadow-md overflow-hidden transition-shadow duration-300 hover:shadow-lg;
+}
+
+/* Input styles */
+.input {
+  @apply w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none 
+         focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
+}
+
+/* Consistent container padding */
+.container-padding {
+  @apply px-4 md:px-6 lg:px-8;
+}
+
+/* Section spacing */
+.section {
+  @apply py-8 md:py-12 lg:py-16;
+}
+
+/* Remove max-width constraint from container in certain contexts */
+.full-width-container {
+  max-width: none !important;
 }
 
 @layer utilities {

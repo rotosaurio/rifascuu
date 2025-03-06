@@ -2,6 +2,13 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { getSession } from 'next-auth/react';
 import connectDB from '../../../lib/mongodb';
 import Raffle from '../../../models/Raffle';
+import { Types } from 'mongoose';
+
+interface SoldTicket {
+  number: number;
+  buyer: Types.ObjectId;
+  purchaseDate: Date;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -20,7 +27,7 @@ export default async function handler(
 
     await connectDB();
 
-    const { raffleId } = req.body;
+    const { raffleId, manualWinnerTicket } = req.body;
 
     if (!raffleId) {
       return res.status(400).json({ message: 'ID de rifa requerido' });
@@ -46,14 +53,67 @@ export default async function handler(
       return res.status(400).json({ message: 'No hay boletos vendidos' });
     }
 
-    // Seleccionar un boleto al azar
-    const randomIndex = Math.floor(Math.random() * raffle.soldTickets.length);
-    const winningTicket = raffle.soldTickets[randomIndex];
+    // Determinar el método de selección
+    const selectionMethod = raffle.winnerSelectionMethod || 'random';
+    let winningTicket;
+
+    // Selección según el método configurado
+    switch (selectionMethod) {
+      case 'random':
+        // Método aleatorio (original)
+        const randomIndex = Math.floor(Math.random() * raffle.soldTickets.length);
+        winningTicket = raffle.soldTickets[randomIndex];
+        break;
+
+      case 'lottery':
+        // Si no hay detalles de lotería, no se puede seleccionar un ganador
+        if (!raffle.lotteryDetails || !raffle.lotteryDetails.drawNumber) {
+          return res.status(400).json({ 
+            message: 'No se han proporcionado detalles del sorteo de lotería' 
+          });
+        }
+        
+        // Implementar lógica basada en lotería
+        // Aquí se podría implementar una lógica específica según el sorteo
+        // Por simplicidad, usamos el número de sorteo como semilla para un número aleatorio
+        const lotteryNumber = parseInt(raffle.lotteryDetails.drawNumber);
+        const seed = isNaN(lotteryNumber) ? Date.now() : lotteryNumber;
+        
+        // Simulamos una selección "determinista" basada en la semilla
+        const pseudoRandom = (seed % raffle.soldTickets.length);
+        winningTicket = raffle.soldTickets[pseudoRandom];
+        break;
+
+      case 'manual':
+        // Selección manual por el creador
+        if (!manualWinnerTicket) {
+          return res.status(400).json({ 
+            message: 'Debes seleccionar manualmente un boleto ganador' 
+          });
+        }
+        
+        // Buscar el boleto seleccionado
+        const ticketNumber = parseInt(manualWinnerTicket);
+        winningTicket = raffle.soldTickets.find((ticket: SoldTicket) => ticket.number === ticketNumber);
+        
+        if (!winningTicket) {
+          return res.status(400).json({ 
+            message: 'El boleto seleccionado no existe o no ha sido vendido' 
+          });
+        }
+        break;
+
+      default:
+        return res.status(400).json({ 
+          message: 'Método de selección no válido' 
+        });
+    }
 
     // Actualizar la rifa con el ganador
     await Raffle.findByIdAndUpdate(raffleId, {
       status: 'completed',
       winner: winningTicket.buyer,
+      winningTicket: winningTicket.number
     });
 
     res.status(200).json({

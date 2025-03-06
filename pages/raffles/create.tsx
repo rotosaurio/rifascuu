@@ -1,40 +1,69 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
+import Image from 'next/image';
 
 export default function CreateRaffle() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [formData, setFormData] = useState({
-    name: '',
+    title: '',
     description: '',
     totalTickets: 100,
-    ticketPrice: 0,
-    images: [] as string[],
-    contactInfo: '',
+    price: 0,
+    startDate: new Date().toISOString().split('T')[0], // Fecha actual como valor predeterminado
+    endDate: '', // Fecha futura
+    winnerSelectionMethod: 'random', // Por defecto aleatoriedad
+    lotteryDate: '',
+    lotteryDrawNumber: '',
+    images: [] as File[],
+    socialLinks: {
+      whatsapp: '',
+      instagram: '',
+      twitter: '',
+      facebook: ''
+    },
     isPromoted: false,
+    promoCode: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
+  const [showLotteryFields, setShowLotteryFields] = useState(false);
 
-  const calculatePrice = (tickets: number) => {
-    let price = 0;
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push('/auth/signin');
+    }
+  }, [status, router]);
+
+  // Efecto para mostrar/ocultar campos específicos para la lotería
+  useEffect(() => {
+    setShowLotteryFields(formData.winnerSelectionMethod === 'lottery');
+  }, [formData.winnerSelectionMethod]);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 5) {
+      setError('Máximo 5 imágenes permitidas');
+      return;
+    }
+
+    setFormData(prev => ({ ...prev, images: files }));
     
-    if (tickets <= 100) {
-      return 0;
-    }
+    // Crear URLs de vista previa
+    const urls = files.map(file => URL.createObjectURL(file));
+    setPreviewUrls(urls);
+  };
 
-    if (tickets <= 10000) {
-      price = Math.ceil(tickets / 10) * 1;
-    } else if (tickets <= 50000) {
-      price = Math.ceil(tickets / 10) * 0.6;
-    } else if (tickets <= 1000000) {
-      price = Math.ceil(tickets / 10) * 0.35;
-    } else {
-      price = tickets * 0.01;
-    }
-
-    return price;
+  const handleSocialLinkChange = (network: keyof typeof formData.socialLinks, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      socialLinks: {
+        ...prev.socialLinks,
+        [network]: value
+      }
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,13 +71,57 @@ export default function CreateRaffle() {
     setLoading(true);
     setError('');
 
+    if (formData.images.length === 0) {
+      setError('Debes subir al menos una imagen');
+      setLoading(false);
+      return;
+    }
+
+    // Validar fechas
+    if (new Date(formData.startDate) > new Date(formData.endDate)) {
+      setError('La fecha de fin debe ser posterior a la fecha de inicio');
+      setLoading(false);
+      return;
+    }
+
+    // Validar campos específicos para lotería
+    if (formData.winnerSelectionMethod === 'lottery' && (!formData.lotteryDate || !formData.lotteryDrawNumber)) {
+      setError('Para método de lotería, debes especificar fecha y número de sorteo');
+      setLoading(false);
+      return;
+    }
+
     try {
+      const formDataObj = new FormData();
+      formDataObj.append('title', formData.title);
+      formDataObj.append('description', formData.description);
+      formDataObj.append('price', formData.price.toString());
+      formDataObj.append('totalTickets', formData.totalTickets.toString());
+      formDataObj.append('isPromoted', String(formData.isPromoted));
+      formDataObj.append('socialLinks', JSON.stringify(formData.socialLinks));
+      
+      // Añadir nuevos campos
+      formDataObj.append('startDate', formData.startDate);
+      formDataObj.append('endDate', formData.endDate);
+      formDataObj.append('winnerSelectionMethod', formData.winnerSelectionMethod);
+      
+      // Añadir campos específicos de lotería si corresponde
+      if (formData.winnerSelectionMethod === 'lottery') {
+        formDataObj.append('lotteryDate', formData.lotteryDate);
+        formDataObj.append('lotteryDrawNumber', formData.lotteryDrawNumber);
+      }
+      
+      if (formData.promoCode) {
+        formDataObj.append('promoCode', formData.promoCode);
+      }
+
+      formData.images.forEach((image) => {
+        formDataObj.append('images', image);
+      });
+
       const res = await fetch('/api/raffles/create', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
+        body: formDataObj,
       });
 
       const data = await res.json();
@@ -58,10 +131,8 @@ export default function CreateRaffle() {
       }
 
       if (data.url) {
-        // Redirigir a Stripe para el pago
         window.location.href = data.url;
       } else {
-        // Rifa creada exitosamente (gratis)
         router.push('/dashboard');
       }
     } catch (error) {
@@ -71,108 +142,318 @@ export default function CreateRaffle() {
     }
   };
 
-  const serviceFee = calculatePrice(formData.totalTickets);
-  const promotionFee = formData.isPromoted ? 500 : 0;
-  const totalFee = serviceFee + promotionFee;
+  // Limpiar URLs de vista previa al desmontar
+  useEffect(() => {
+    return () => {
+      previewUrls.forEach(url => URL.revokeObjectURL(url));
+    };
+  }, [previewUrls]);
 
-  if (!session) {
+  if (status === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-red-600">Debes iniciar sesión para crear una rifa</p>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
     );
   }
 
+  if (!session) {
+    return null;
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-yellow-400 via-red-500 to-pink-600 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl mx-auto">
-        <div className="bg-white p-8 rounded-lg shadow">
+        <div className="bg-white/90 backdrop-blur-md p-8 rounded-lg shadow-xl">
           <h1 className="text-3xl font-bold text-gray-900 mb-8">Crear Nueva Rifa</h1>
           
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
                 {error}
               </div>
             )}
 
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-                Nombre de la Rifa
+              <label htmlFor="title" className="block text-sm font-semibold text-gray-900">
+                Título de la Rifa
               </label>
               <input
                 type="text"
-                id="name"
+                id="title"
                 required
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="Ingresa el título de tu rifa"
               />
             </div>
 
             <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="description" className="block text-sm font-semibold text-gray-900">
                 Descripción
               </label>
               <textarea
                 id="description"
                 required
                 rows={4}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Describe los detalles de tu rifa"
               />
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="totalTickets" className="block text-sm font-semibold text-gray-900">
+                  Número de Boletos
+                </label>
+                <input
+                  type="number"
+                  id="totalTickets"
+                  required
+                  min="1"
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  value={formData.totalTickets}
+                  onChange={(e) => setFormData({ ...formData, totalTickets: parseInt(e.target.value) })}
+                  placeholder="Ej: 100"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="price" className="block text-sm font-semibold text-gray-900">
+                  Precio por Boleto (MXN)
+                </label>
+                <input
+                  type="number"
+                  id="price"
+                  required
+                  min="0"
+                  step="0.01"
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  value={formData.price}
+                  onChange={(e) => setFormData({ ...formData, price: parseFloat(e.target.value) })}
+                  placeholder="Ej: 50.00"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="startDate" className="block text-sm font-semibold text-gray-900">
+                  Fecha de Inicio
+                </label>
+                <input
+                  type="date"
+                  id="startDate"
+                  required
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  value={formData.startDate}
+                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="endDate" className="block text-sm font-semibold text-gray-900">
+                  Fecha de Finalización
+                </label>
+                <input
+                  type="date"
+                  id="endDate"
+                  required
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  value={formData.endDate}
+                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                />
+              </div>
+            </div>
+
             <div>
-              <label htmlFor="totalTickets" className="block text-sm font-medium text-gray-700">
-                Cantidad de Boletos
+              <label htmlFor="winnerSelectionMethod" className="block text-sm font-semibold text-gray-900">
+                Método de Selección del Ganador
+              </label>
+              <select
+                id="winnerSelectionMethod"
+                required
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                value={formData.winnerSelectionMethod}
+                onChange={(e) => setFormData({ ...formData, winnerSelectionMethod: e.target.value })}
+              >
+                <option value="random">Selección Aleatoria</option>
+                <option value="lottery">Basado en Lotería Nacional</option>
+                <option value="manual">Selección Manual por el Creador</option>
+              </select>
+            </div>
+
+            {showLotteryFields && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="lotteryDate" className="block text-sm font-semibold text-gray-900">
+                    Fecha del Sorteo de Lotería
+                  </label>
+                  <input
+                    type="date"
+                    id="lotteryDate"
+                    required={formData.winnerSelectionMethod === 'lottery'}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    value={formData.lotteryDate}
+                    onChange={(e) => setFormData({ ...formData, lotteryDate: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="lotteryDrawNumber" className="block text-sm font-semibold text-gray-900">
+                    Número del Sorteo
+                  </label>
+                  <input
+                    type="text"
+                    id="lotteryDrawNumber"
+                    required={formData.winnerSelectionMethod === 'lottery'}
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    value={formData.lotteryDrawNumber}
+                    onChange={(e) => setFormData({ ...formData, lotteryDrawNumber: e.target.value })}
+                    placeholder="Ej: 1234"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="promoCode" className="block text-sm font-semibold text-gray-900">
+                Código Promocional (opcional)
               </label>
               <input
-                type="number"
-                id="totalTickets"
-                required
-                min="1"
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={formData.totalTickets}
-                onChange={(e) => setFormData({ ...formData, totalTickets: parseInt(e.target.value) })}
-              />
-              <p className="mt-1 text-sm text-gray-500">
-                Costo del servicio: ${serviceFee.toFixed(2)} MXN
-              </p>
-            </div>
-
-            <div>
-              <label htmlFor="ticketPrice" className="block text-sm font-medium text-gray-700">
-                Precio por Boleto (MXN)
-              </label>
-              <input
-                type="number"
-                id="ticketPrice"
-                required
-                min="0"
-                step="0.01"
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={formData.ticketPrice}
-                onChange={(e) => setFormData({ ...formData, ticketPrice: parseFloat(e.target.value) })}
+                type="text"
+                id="promoCode"
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                value={formData.promoCode}
+                onChange={(e) => setFormData({ ...formData, promoCode: e.target.value })}
+                placeholder="Si tienes un código promocional, ingrésalo aquí"
               />
             </div>
 
             <div>
-              <label htmlFor="contactInfo" className="block text-sm font-medium text-gray-700">
-                Información de Contacto
+              <label className="block text-sm font-semibold text-gray-900 mb-2">
+                Imágenes (Máximo 5)
               </label>
-              <textarea
-                id="contactInfo"
-                required
-                rows={2}
-                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                value={formData.contactInfo}
-                onChange={(e) => setFormData({ ...formData, contactInfo: e.target.value })}
-              />
+              <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-indigo-500 transition-colors">
+                <div className="space-y-1 text-center">
+                  <svg
+                    className="mx-auto h-12 w-12 text-gray-400"
+                    stroke="currentColor"
+                    fill="none"
+                    viewBox="0 0 48 48"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <div className="flex text-sm text-gray-600">
+                    <label
+                      htmlFor="images"
+                      className="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500"
+                    >
+                      <span>Sube tus imágenes</span>
+                      <input
+                        id="images"
+                        name="images"
+                        type="file"
+                        className="sr-only"
+                        multiple
+                        accept="image/*"
+                        onChange={handleImageChange}
+                      />
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-500">PNG, JPG, GIF hasta 10MB</p>
+                </div>
+              </div>
+
+              {previewUrls.length > 0 && (
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {previewUrls.map((url, index) => (
+                    <div key={index} className="relative aspect-w-16 aspect-h-9">
+                      <Image
+                        src={url}
+                        alt={`Preview ${index + 1}`}
+                        layout="fill"
+                        objectFit="cover"
+                        className="rounded-lg"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div className="flex items-center">
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900">Redes Sociales (opcional)</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="whatsapp" className="block text-sm font-semibold text-gray-900">
+                    WhatsApp
+                  </label>
+                  <input
+                    type="text"
+                    id="whatsapp"
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    value={formData.socialLinks.whatsapp}
+                    onChange={(e) => handleSocialLinkChange('whatsapp', e.target.value)}
+                    placeholder="Número de WhatsApp"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="instagram" className="block text-sm font-semibold text-gray-900">
+                    Instagram
+                  </label>
+                  <input
+                    type="text"
+                    id="instagram"
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    value={formData.socialLinks.instagram}
+                    onChange={(e) => handleSocialLinkChange('instagram', e.target.value)}
+                    placeholder="@usuario"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="facebook" className="block text-sm font-semibold text-gray-900">
+                    Facebook
+                  </label>
+                  <input
+                    type="text"
+                    id="facebook"
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    value={formData.socialLinks.facebook}
+                    onChange={(e) => handleSocialLinkChange('facebook', e.target.value)}
+                    placeholder="URL de Facebook"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="twitter" className="block text-sm font-semibold text-gray-900">
+                    Twitter
+                  </label>
+                  <input
+                    type="text"
+                    id="twitter"
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    value={formData.socialLinks.twitter}
+                    onChange={(e) => handleSocialLinkChange('twitter', e.target.value)}
+                    placeholder="@usuario"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center bg-indigo-50 p-4 rounded-lg">
               <input
                 type="checkbox"
                 id="isPromoted"
@@ -181,35 +462,17 @@ export default function CreateRaffle() {
                 onChange={(e) => setFormData({ ...formData, isPromoted: e.target.checked })}
               />
               <label htmlFor="isPromoted" className="ml-2 block text-sm text-gray-900">
-                Promocionar en la página principal ($500 MXN/mes)
+                Promocionar en la página principal (+$400 MXN)
               </label>
             </div>
 
-            <div className="bg-gray-50 p-4 rounded-md">
-              <h3 className="text-lg font-medium text-gray-900">Resumen de Costos</h3>
-              <dl className="mt-4 space-y-2">
-                <div className="flex justify-between">
-                  <dt className="text-sm text-gray-600">Costo del servicio:</dt>
-                  <dd className="text-sm font-medium text-gray-900">${serviceFee.toFixed(2)} MXN</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-sm text-gray-600">Costo de promoción:</dt>
-                  <dd className="text-sm font-medium text-gray-900">${promotionFee.toFixed(2)} MXN</dd>
-                </div>
-                <div className="flex justify-between border-t border-gray-200 pt-2">
-                  <dt className="text-sm font-medium text-gray-900">Total:</dt>
-                  <dd className="text-sm font-medium text-gray-900">${totalFee.toFixed(2)} MXN</dd>
-                </div>
-              </dl>
-            </div>
-
-            <div>
+            <div className="flex justify-end">
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-2 rounded-md hover:from-indigo-700 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-all duration-200 transform hover:scale-105"
               >
-                {loading ? 'Procesando...' : 'Crear Rifa'}
+                {loading ? 'Creando...' : 'Crear Rifa'}
               </button>
             </div>
           </form>
@@ -217,4 +480,4 @@ export default function CreateRaffle() {
       </div>
     </div>
   );
-} 
+}

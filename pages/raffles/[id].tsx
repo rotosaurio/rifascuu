@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 type Raffle = {
   _id: string;
@@ -15,7 +16,14 @@ type Raffle = {
   }>;
   status: 'active' | 'completed' | 'cancelled';
   isPromoted: boolean;
-  images: string[];
+  images: Array<{
+    data: string;
+    contentType: string;
+  }>;
+  cloudinaryImages: Array<{
+    url: string;
+    publicId: string;
+  }>;
   contactInfo: string;
   creator: {
     _id: string;
@@ -197,13 +205,39 @@ export default function RaffleDetail() {
                 <h2 className="text-xl font-semibold text-gray-900 mb-4">
                   Información de la Rifa
                 </h2>
+                
+                {/* Galería de imágenes */}
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-gray-600 mb-2">
+                    Imágenes
+                  </h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    {raffle.cloudinaryImages && raffle.cloudinaryImages.length > 0 ? (
+                      raffle.cloudinaryImages.map((img, index) => (
+                        <div key={index} className="relative h-40 rounded-lg overflow-hidden">
+                          <Image 
+                            src={img.url} 
+                            alt={`Imagen de rifa ${index + 1}`}
+                            fill
+                            style={{ objectFit: 'cover' }}
+                          />
+                        </div>
+                      ))
+                    ) : (
+                      <div className="col-span-2 p-4 bg-gray-100 rounded-lg text-center">
+                        <p className="text-gray-500">No hay imágenes disponibles</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
                 <dl className="space-y-4">
                   <div>
                     <dt className="text-sm font-medium text-gray-600">
                       Organizador
                     </dt>
                     <dd className="mt-1 text-sm text-gray-900">
-                      {raffle.creator.name}
+                      {raffle.creator ? (raffle.creator.name || 'Sin nombre') : 'No disponible'}
                     </dd>
                   </div>
                   <div>
@@ -321,7 +355,7 @@ export default function RaffleDetail() {
               </div>
             </div>
 
-            {session?.user?.id === raffle.creator._id && raffle.status === 'active' && (
+            {session?.user?.id === raffle.creator?._id && raffle.status === 'active' && (
               <div className="mt-6">
                 <button
                   onClick={handleSelectWinner}
