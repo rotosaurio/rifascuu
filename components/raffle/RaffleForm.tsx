@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,6 +16,8 @@ const raffleFormSchema = z.object({
   drawDate: z.string(),
   image: z.any(),
   prizeImages: z.any(),
+  isPromoted: z.boolean().default(false),
+  promotionMonths: z.number().min(1).max(12).optional(),
 });
 
 type RaffleFormValues = z.infer<typeof raffleFormSchema>;
@@ -30,6 +32,7 @@ export default function RaffleForm({ isEditMode = false, initialData = {}, isCom
   const router = useRouter();
   const [mainImagePreview, setMainImagePreview] = useState<string | null>(initialData.image || null);
   const [prizeImagePreviews, setPrizeImagePreviews] = useState<string[]>(initialData.prizeImages || []);
+  const [userActiveRaffles, setUserActiveRaffles] = useState<number | null>(null);
   
   // Get tomorrow's date for min date in draw date picker
   const tomorrow = new Date();
@@ -48,6 +51,8 @@ export default function RaffleForm({ isEditMode = false, initialData = {}, isCom
   const applyDiscount = watch('applyDiscount');
   const ticketPrice = watch('ticketPrice');
   const discountPercentage = watch('discountPercentage');
+  const isPromoted = watch('isPromoted');
+  const promotionMonths = watch('promotionMonths') || 1;
   
   const handleMainImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -132,7 +137,124 @@ export default function RaffleForm({ isEditMode = false, initialData = {}, isCom
   const discountedPrice = applyDiscount && discountPercentage && ticketPrice 
     ? ticketPrice * (1 - (discountPercentage / 100)) 
     : null;
+    
+  // Add a function to check the user's active raffles
+  useEffect(() => {
+    const checkActiveRaffles = async () => {
+      try {
+        const res = await fetch('/api/raffles/user-active-count');
+        if (res.ok) {
+          const data = await res.json();
+          setUserActiveRaffles(data.count);
+        }
+      } catch (error) {
+        console.error('Failed to fetch active raffles count:', error);
+      }
+    };
+    
+    checkActiveRaffles();
+  }, []);
   
+  // Calculate the final price
+  const calculateTotalPrice = () => {
+    const totalTicketsCount = watch('totalTickets') || 0;
+    const promotionMonthsCount = watch('promotionMonths') || 1;
+    
+    // Check if user is eligible for a free raffle
+    const isFreeRaffle = userActiveRaffles === 0 && totalTicketsCount <= 100;
+    
+    // If it's a free raffle, return all zeros
+    if (isFreeRaffle) {
+      return {
+        fixedFee: 0,
+        ticketBasedCommission: 0,
+        promotionPrice: 0,
+        totalPrice: 0,
+        isFreeRaffle: true
+      };
+    }
+    
+    // Fixed fee for creating a raffle
+    const fixedFee = 20; // 20 MXN
+    
+    // Calculate ticket-based commission rate
+    let ticketCommissionRate = 0;
+    let commissionPerTenTickets = 0;
+    
+    if (totalTicketsCount <= 100) {
+      commissionPerTenTickets = 1.00; // $1 per 10 tickets for small raffles
+    } else if (totalTicketsCount <= 1000) {
+      commissionPerTenTickets = 0.80; // $0.80 per 10 tickets for medium raffles
+    } else if (totalTicketsCount <= 10000) {
+      commissionPerTenTickets = 0.70; // $0.70 per 10 tickets for larger raffles
+    } else if (totalTicketsCount <= 50000) {
+      commissionPerTenTickets = 0.50; // $0.50 per 10 tickets for very large raffles
+    } else if (totalTicketsCount <= 1000000) {
+      commissionPerTenTickets = 0.30; // $0.30 per 10 tickets for massive raffles
+    } else {
+      // For extremely large raffles, charge per individual ticket
+      ticketCommissionRate = 0.01; // $0.01 per ticket
+    }
+    
+    // Calculate total ticket-based commission
+    const ticketsInTens = Math.ceil(totalTicketsCount / 10);
+    const ticketBasedCommission = ticketCommissionRate > 0 
+      ? totalTicketsCount * ticketCommissionRate 
+      : ticketsInTens * commissionPerTenTickets;
+    
+    // Promotion price (if applicable)
+    const promotionPrice = isPromoted ? 500 * promotionMonthsCount : 0; // 500 MXN per month for promotion
+    
+    // Calculate total price
+    const totalPrice = fixedFee + ticketBasedCommission + promotionPrice;
+    
+    return {
+      fixedFee,
+      ticketBasedCommission,
+      promotionPrice,
+      totalPrice,
+      isFreeRaffle: false
+    };
+  };
+  
+  const priceBreakdown = calculateTotalPrice();
+  
+  // Promotion selection section
+  const renderPromotionSection = () => (
+    <div className="mt-6">
+      <div className="flex items-center mb-4">
+        <input
+          type="checkbox"
+          id="isPromoted"
+          {...register('isPromoted')}
+          className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+        />
+        <label htmlFor="isPromoted" className="ml-2 block text-sm font-medium text-gray-700">
+          Promocionar en la página principal (500 MXN por mes)
+        </label>
+      </div>
+      
+      {isPromoted && (
+        <div className="ml-6">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Duración de la promoción (meses)
+          </label>
+          <select
+            {...register('promotionMonths', { valueAsNumber: true })}
+            className="w-full p-2 border border-gray-300 rounded-md"
+            defaultValue={1}
+          >
+            {[...Array(12)].map((_, i) => (
+              <option key={i+1} value={i+1}>
+                {i+1} {i === 0 ? 'mes' : 'meses'} (${(i+1) * 500} MXN)
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       <div>
@@ -351,6 +473,57 @@ export default function RaffleForm({ isEditMode = false, initialData = {}, isCom
             </div>
           )}
         </div>
+        
+        {renderPromotionSection()}
+      </div>
+      
+      <div className="bg-blue-50 p-6 rounded-lg border border-blue-100">
+        <h3 className="text-lg font-semibold text-blue-800 mb-4">Resumen de Costos</h3>
+        
+        {priceBreakdown.isFreeRaffle ? (
+          <div className="bg-green-50 p-4 rounded-md border border-green-200">
+            <div className="flex items-center">
+              <svg className="h-5 w-5 text-green-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <span className="font-medium text-green-700">¡Rifa gratuita!</span>
+            </div>
+            <p className="text-sm text-green-600 mt-1">
+              Esta rifa es gratuita porque es tu primera rifa activa y tiene 100 boletos o menos.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2 mb-4">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-700">Tarifa fija:</span>
+              <span className="font-medium">${priceBreakdown.fixedFee.toFixed(2)} MXN</span>
+            </div>
+            
+            <div className="flex justify-between items-center">
+              <span className="text-gray-700">Comisión por boletos:</span>
+              <span className="font-medium">${priceBreakdown.ticketBasedCommission.toFixed(2)} MXN</span>
+            </div>
+            
+            {isPromoted && (
+              <div className="flex justify-between items-center">
+                <span className="text-gray-700">Promoción ({promotionMonths} {promotionMonths === 1 ? 'mes' : 'meses'}):</span>
+                <span className="font-medium">${priceBreakdown.promotionPrice.toFixed(2)} MXN</span>
+              </div>
+            )}
+            
+            <div className="border-t border-blue-200 pt-2 mt-2">
+              <div className="flex justify-between font-semibold text-lg">
+                <span className="text-blue-800">Costo Total:</span>
+                <span className="text-blue-800">${priceBreakdown.totalPrice.toFixed(2)} MXN</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {userActiveRaffles === null ? 
+                  "Cargando información..." : 
+                  "Este monto será cobrado al finalizar la creación de la rifa."}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
       
       <div className="flex justify-end">
@@ -358,7 +531,7 @@ export default function RaffleForm({ isEditMode = false, initialData = {}, isCom
           type="submit"
           className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700"
         >
-          {isEditMode ? 'Guardar Cambios' : 'Crear Rifa'}
+          {isEditMode ? 'Guardar Cambios' : priceBreakdown.isFreeRaffle ? 'Crear Rifa Gratuita' : 'Crear Rifa'}
         </button>
       </div>
     </form>

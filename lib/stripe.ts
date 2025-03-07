@@ -4,9 +4,10 @@ if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error('Missing STRIPE_SECRET_KEY environment variable');
 }
 
-// Fix: Use a type assertion for the API version string
+// Use the latest API version from the Stripe types
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2022-11-15' as Stripe.StripeConfig['apiVersion'], // Use TypeScript's supported version
+  // Let TypeScript infer the correct API version instead of hardcoding it
+  apiVersion: '2023-10-16' as Stripe.StripeConfig['apiVersion'],
 });
 
 export async function createCheckoutSession(params: {

@@ -12,6 +12,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     // Connect to database
     await connectDB();
+    console.log('Connected to database in register handler');
 
     const { name, email, password, promoCode } = req.body;
 
@@ -20,9 +21,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ success: false, message: 'Faltan campos obligatorios' });
     }
 
+    console.log(`Registering user: ${email}`);
+
     // Check if email already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
+      console.log(`User already exists: ${email}`);
       return res.status(400).json({ success: false, message: 'Este email ya está registrado' });
     }
 
@@ -30,24 +34,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user
+    // Create user with proper schema fields
     const newUser = new User({
-      name,
       email,
+      name,
       password: hashedPassword,
       promoCode: promoCode || undefined,
       role: 'user', // Default role
       freeRafflesCount: 0,
+      createdAt: new Date(),
+      createdRaffles: [],
+      participatingRaffles: []
     });
 
-    // Save the user
-    await newUser.save();
+    // Save the user to the database
+    const savedUser = await newUser.save();
+    console.log(`User saved successfully: ${savedUser._id}`);
 
     // If user provided a promo code, check if it's valid and apply benefits
     if (promoCode) {
+      console.log(`Checking promo code: ${promoCode}`);
       const promoOwner = await User.findOne({ promoCode });
       if (promoOwner) {
         // Update the new user to mark promo code as used
+        console.log(`Promo code valid, owned by: ${promoOwner._id}`);
         newUser.promoCodeUsed = true;
         await newUser.save();
 
@@ -55,6 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         await User.findByIdAndUpdate(promoOwner._id, {
           $inc: { freeRafflesCount: 1 }
         });
+        console.log(`Credited free raffle to user: ${promoOwner._id}`);
       }
     }
 
@@ -63,10 +74,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       success: true,
       message: 'Usuario creado correctamente',
       user: {
-        id: newUser._id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
+        id: savedUser._id,
+        name: savedUser.name,
+        email: savedUser.email,
+        role: savedUser.role,
       },
     });
   } catch (error) {
@@ -74,6 +85,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({
       success: false,
       message: 'Error al registrar usuario',
+      error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 }

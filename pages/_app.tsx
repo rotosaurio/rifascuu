@@ -1,4 +1,4 @@
-import { SessionProvider, useSession } from 'next-auth/react';
+import { SessionProvider } from 'next-auth/react';
 import type { AppProps } from 'next/app';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
@@ -16,9 +16,8 @@ function AppContent({ Component, pageProps }: AppContentProps) {
   const [pageLoading, setPageLoading] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isCompanyOwner, setIsCompanyOwner] = useState(false);
-  const { data: session } = useSession();
 
-  // Add page transition effect
+  // Add page transition effect with cleanup
   useEffect(() => {
     const handleStart = () => setPageLoading(true);
     const handleComplete = () => setPageLoading(false);
@@ -34,28 +33,19 @@ function AppContent({ Component, pageProps }: AppContentProps) {
     };
   }, [router]);
 
-  // Check user roles
+  // Check user roles - do this with useEffect rather than direct render to avoid hydration issues
   useEffect(() => {
-    const checkUserStatus = () => {
-      try {
-        if (session?.user?.role === 'admin') {
-          setIsAdmin(true);
-          setIsCompanyOwner(false);
-        } else if (session?.user?.role === 'company_owner') {
-          setIsAdmin(false);
-          setIsCompanyOwner(true);
-        } else {
-          setIsAdmin(false);
-          setIsCompanyOwner(false);
-        }
-      } catch (error) {
-        setIsAdmin(false);
-        setIsCompanyOwner(false);
-      }
-    };
-
-    checkUserStatus();
-  }, [session]);
+    if (pageProps.session?.user?.role === 'admin') {
+      setIsAdmin(true);
+      setIsCompanyOwner(false);
+    } else if (pageProps.session?.user?.role === 'company_owner') {
+      setIsAdmin(false);
+      setIsCompanyOwner(true);
+    } else {
+      setIsAdmin(false);
+      setIsCompanyOwner(false);
+    }
+  }, [pageProps.session]);
 
   return (
     <Layout isAdmin={isAdmin} isCompanyOwner={isCompanyOwner}>
@@ -77,10 +67,10 @@ export default function App({
   return (
     <SessionProvider 
       session={session}
-      refetchInterval={5 * 60} // Revalidate every 5 minutes
-      refetchOnWindowFocus={true}
+      refetchInterval={0} // Don't automatically revalidate to prevent reload loops
+      refetchOnWindowFocus={false} // Don't revalidate on window focus to prevent reload
     >
-      <AppContent Component={Component} pageProps={pageProps} />
+      <AppContent Component={Component} pageProps={{...pageProps, session}} />
     </SessionProvider>
   );
 }

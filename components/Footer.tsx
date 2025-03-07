@@ -88,7 +88,7 @@ const Footer = () => {
         </div>
         
         <div className="mt-8 pt-8 border-t border-white/20 text-center text-white/80">
-          <p>&copy; {currentYear} RifasCUU. Todos los derechos reservados.</p>
+          <p>&copy; {currentYear} RifasCUU. Todos los derechos reservados. Creado Por Sysrot</p>
         </div>
       </div>
     </footer>

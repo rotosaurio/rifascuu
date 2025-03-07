@@ -1,66 +1,74 @@
 import { v2 as cloudinary } from 'cloudinary';
+import { UploadApiOptions, UploadApiResponse } from 'cloudinary';
 
-// Configure Cloudinary with environment variables
+// Define result interface for better type checking
+interface CloudinaryUploadResult {
+  secure_url: string;
+  public_id: string;
+  asset_id?: string;
+  version_id?: string;
+  format?: string;
+  width?: number;
+  height?: number;
+  [key: string]: any;
+}
+
+// Configure Cloudinary
 cloudinary.config({
-  cloud_name: process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY,
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true
 });
 
 /**
- * Upload a file to Cloudinary
- * @param file The file to upload
- * @param folder Optional folder path in Cloudinary
- * @returns Promise with the upload result
+ * Uploads an image buffer to Cloudinary
+ * @param fileBuffer The file buffer to upload
+ * @param options Additional upload options
+ * @returns The Cloudinary upload result
  */
-export const uploadToCloudinary = async (
-  file: string | Buffer,
-  folder = 'raffles'
-) => {
+export async function uploadToCloudinary(fileBuffer: Buffer, options: Partial<UploadApiOptions> = {}): Promise<CloudinaryUploadResult> {
   try {
-    const uploadResult = await new Promise((resolve, reject) => {
-      const uploadOptions = {
-        folder,
-        upload_preset: process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET,
-        resource_type: 'auto',
-      };
-      
-      cloudinary.uploader.upload(file, uploadOptions, (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
+    // Convert Buffer to base64
+    const fileStr = fileBuffer.toString('base64');
+    const base64File = `data:image/jpeg;base64,${fileStr}`;
+    
+    // Set default upload options with proper type for resource_type
+    const uploadOptions: UploadApiOptions = {
+      folder: 'rifas',
+      resource_type: 'image', // Now correctly typed as one of the allowed values
+      ...options
+    };
+    
+    // Upload to Cloudinary
+    const uploadResponse = await new Promise<CloudinaryUploadResult>((resolve, reject) => {
+      cloudinary.uploader.upload(base64File, uploadOptions, (error, result) => {
+        if (error) reject(error);
+        else resolve(result as CloudinaryUploadResult);
       });
     });
     
-    return uploadResult;
+    console.log('Image uploaded to Cloudinary successfully');
+    return uploadResponse;
   } catch (error) {
     console.error('Error uploading to Cloudinary:', error);
-    throw new Error('Failed to upload image to Cloudinary');
+    throw error;
   }
-};
+}
 
 /**
- * Delete a file from Cloudinary by public_id
- * @param publicId The public_id of the file to delete
- * @returns Promise with deletion result
+ * Deletes an image from Cloudinary by public ID
+ * @param publicId The public ID of the image to delete
+ * @returns The Cloudinary deletion result
  */
-export const deleteFromCloudinary = async (publicId: string) => {
+export async function deleteFromCloudinary(publicId: string) {
   try {
-    return await cloudinary.uploader.destroy(publicId);
+    const result = await cloudinary.uploader.destroy(publicId);
+    return result;
   } catch (error) {
     console.error('Error deleting from Cloudinary:', error);
-    throw new Error('Failed to delete image from Cloudinary');
+    throw error;
   }
-};
+}
 
-/**
- * Generate a Cloudinary URL with transformations
- * @param publicId The public_id of the image
- * @param options Transformation options
- * @returns URL string with transformations
- */
-export const getCloudinaryUrl = (publicId: string, options = {}) => {
-  return cloudinary.url(publicId, {
-    secure: true,
-    ...options
-  });
-};
+export default cloudinary;

@@ -1,79 +1,85 @@
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 
-// Variable global para mantener la instancia de MongoMemoryServer
+// Global variable for MongoMemoryServer instance (only used in development)
 let mongoMemoryServer: MongoMemoryServer | null = null;
 
 const connectDB = async () => {
   try {
-    const opts = {
-      bufferCommands: false,
-      connectTimeoutMS: 30000, // 30 segundos de timeout
-      socketTimeoutMS: 45000,  // 45 segundos de timeout para operaciones
-      serverSelectionTimeoutMS: 30000, // 30 segundos para seleccionar servidor
-      maxPoolSize: 10, // Máximo de 10 conexiones en el pool
-      retryWrites: true
-    };
-
-    // Si ya hay una conexión activa, la devolvemos
+    // If already connected, return the existing connection
     if (mongoose.connections[0].readyState) {
+      console.log('Using existing MongoDB connection');
       return mongoose;
     }
+    
+    const opts = {
+      bufferCommands: false,
+      connectTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 30000,
+      maxPoolSize: 10,
+      dbName: 'rifas', // Explicitly set database name to "rifas"
+    };
 
-    // Si estamos en desarrollo y no hay una URI definida, o la conexión a ella falla, usamos MongoDB Memory Server
-    if (process.env.NODE_ENV !== 'production' && (!process.env.MONGODB_URI || process.env.USE_MEMORY_DB === 'true')) {
-      console.log('Usando MongoDB Memory Server para desarrollo');
+    // Parse USE_MEMORY_DB explicitly to boolean
+    // Convert 'true' string to boolean true, anything else is false
+    const useMemoryDB = process.env.USE_MEMORY_DB === 'true';
+    
+    console.log(`MONGODB_URI exists: ${Boolean(process.env.MONGODB_URI)}`);
+    console.log(`USE_MEMORY_DB value: ${process.env.USE_MEMORY_DB}`);
+    console.log(`Should use memory server: ${useMemoryDB}`);
+
+    // Check if we should use memory server
+    if (useMemoryDB) {
+      console.log('Explicitly using MongoDB Memory Server for development');
       
       if (!mongoMemoryServer) {
-        mongoMemoryServer = await MongoMemoryServer.create();
+        mongoMemoryServer = await MongoMemoryServer.create({
+          instance: {
+            dbName: 'rifas' // Ensure memory server also uses "rifas" database
+          }
+        });
       }
       
       const uri = mongoMemoryServer.getUri();
+      console.log(`Memory server URI: ${uri}`);
       await mongoose.connect(uri, opts);
-      console.log('Conexión a MongoDB Memory Server establecida correctamente');
+      console.log('Successfully connected to MongoDB Memory Server database: rifas');
       return mongoose;
     }
 
-    // En producción o si hay una URI definida, usamos esa
+    // If we're here, we're supposed to use a real MongoDB connection
     if (!process.env.MONGODB_URI) {
-      throw new Error('Por favor define la variable de entorno MONGODB_URI');
+      throw new Error('MONGODB_URI environment variable is required when USE_MEMORY_DB is not true');
     }
 
-    const MONGODB_URI = process.env.MONGODB_URI;
-    await mongoose.connect(MONGODB_URI, opts);
-    console.log('Conexión a MongoDB establecida correctamente');
+    // Connect to the real MongoDB database
+    console.log('Connecting to MongoDB Atlas...');
+    await mongoose.connect(process.env.MONGODB_URI, opts);
+    console.log('Successfully connected to MongoDB Atlas database: rifas');
+    
     return mongoose;
   } catch (error) {
-    console.error('Error al conectar a MongoDB:', error);
-    
-    // Si estamos en desarrollo y la conexión a MongoDB Atlas falla, intentamos con MongoDB Memory Server
-    if (process.env.NODE_ENV !== 'production' && !mongoMemoryServer) {
-      console.log('Intentando con MongoDB Memory Server después de fallo...');
-      
-      try {
-        mongoMemoryServer = await MongoMemoryServer.create();
-        const uri = mongoMemoryServer.getUri();
-        
-        const opts = {
-          bufferCommands: false,
-          connectTimeoutMS: 30000,
-          socketTimeoutMS: 45000,
-          serverSelectionTimeoutMS: 30000,
-          maxPoolSize: 10,
-          retryWrites: true
-        };
-        
-        await mongoose.connect(uri, opts);
-        console.log('Conexión a MongoDB Memory Server establecida correctamente (fallback)');
-        return mongoose;
-      } catch (memoryServerError) {
-        console.error('Error al conectar a MongoDB Memory Server:', memoryServerError);
-        throw memoryServerError;
-      }
-    }
-    
+    console.error('Failed to connect to MongoDB:', error);
     throw error;
   }
 };
 
-export default connectDB; 
+// Add this function to properly close connections, especially useful for tests
+export const disconnectDB = async () => {
+  try {
+    await mongoose.disconnect();
+    
+    if (mongoMemoryServer) {
+      await mongoMemoryServer.stop();
+      mongoMemoryServer = null;
+    }
+    
+    console.log('Disconnected from MongoDB');
+  } catch (error) {
+    console.error('Failed to disconnect from MongoDB:', error);
+    throw error;
+  }
+};
+
+export default connectDB;

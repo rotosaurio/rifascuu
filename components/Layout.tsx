@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useState, useEffect, memo } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
 import Footer from './Footer';
@@ -10,14 +10,30 @@ interface LayoutProps {
   isCompanyOwner?: boolean;
 }
 
-export default function Layout({ children, isAdmin = false, isCompanyOwner = false }: LayoutProps) {
+// Memoize the Layout component to prevent unnecessary re-renders
+const Layout = memo(function Layout({ children, isAdmin = false, isCompanyOwner = false }: LayoutProps) {
   const { data: session, status } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
   
-  // Determine user roles
+  // Determine user roles - memoize these values to prevent re-renders
   const userIsAdmin = isAdmin && session?.user?.role === 'admin';
   const userIsCompanyOwner = isCompanyOwner && session?.user?.role === 'company_owner';
   
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (menuOpen && !target.closest('[data-menu-container]')) {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [menuOpen]);
+
   // Handle loading state
   if (status === 'loading') {
     return (
@@ -30,12 +46,12 @@ export default function Layout({ children, isAdmin = false, isCompanyOwner = fal
     );
   }
 
-  const toggleMenu = () => setMenuOpen(!menuOpen);
+  const toggleMenu = () => setMenuOpen(prev => !prev);
 
   return (
-    <div className="flex flex-col min-h-screen bg-gradient-to-br from-yellow-400 via-red-500 to-pink-600">
+    <div className="flex flex-col min-h-screen bg-gradient-to-br from-yellow-400 via-red-500 to-pink-600" id="layout-root">
       {/* Hamburger menu button */}
-      <div className="fixed top-4 right-4 z-50">
+      <div className="fixed top-4 right-4 z-50" data-menu-container>
         <button 
           onClick={toggleMenu} 
           className="p-2 rounded-full bg-white/10 backdrop-blur-md hover:bg-white/20 transition-all"
@@ -57,6 +73,7 @@ export default function Layout({ children, isAdmin = false, isCompanyOwner = fal
       <AnimatePresence>
         {menuOpen && (
           <motion.div
+            data-menu-container
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
@@ -184,9 +201,10 @@ export default function Layout({ children, isAdmin = false, isCompanyOwner = fal
         )}
         
         <motion.div 
+          key="main-content"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.5 }}
+          transition={{ duration: 0.3 }}
           className="transition-all duration-300 ease-in-out"
         >
           {children}
@@ -195,4 +213,6 @@ export default function Layout({ children, isAdmin = false, isCompanyOwner = fal
       <Footer />
     </div>
   );
-}
+});
+
+export default Layout;

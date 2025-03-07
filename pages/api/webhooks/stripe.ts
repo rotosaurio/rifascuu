@@ -39,7 +39,7 @@ const DEFAULT_CLOUDINARY_IMAGE: CloudinaryImage = {
 };
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2022-11-15',
+  apiVersion: '2023-10-16' as Stripe.StripeConfig['apiVersion'],
 });
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -55,7 +55,7 @@ export default async function handler(
   res: NextApiResponse
 ) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'Método no permitido' });
+    return res.status(405).json({ message: 'Method Not Allowed' });
   }
 
   let event: Stripe.Event;
@@ -65,179 +65,87 @@ export default async function handler(
     const sig = req.headers['stripe-signature'];
 
     if (!sig) {
-      return res.status(400).json({ message: 'Falta la firma de Stripe' });
+      return res.status(400).json({ message: 'Missing Stripe signature' });
     }
 
     try {
       event = stripe.webhooks.constructEvent(buf, sig, webhookSecret);
     } catch (err) {
-      console.error('Error al verificar firma del webhook:', err);
-      return res.status(400).json({ message: 'Error de verificación del webhook' });
+      console.error('Error verifying webhook signature:', err);
+      return res.status(400).json({ message: 'Webhook verification error' });
     }
 
-    console.log('Evento de Stripe recibido:', event.type);
+    console.log('Stripe webhook received:', event.type);
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as Stripe.Checkout.Session;
       
-      // Verificar que existe metadata
+      // Verify that metadata exists
       if (!session.metadata) {
-        console.error('La sesión no contiene metadata');
-        return res.status(400).json({ message: 'La sesión no contiene metadata necesaria' });
+        console.error('Session does not contain metadata');
+        return res.status(400).json({ message: 'Session does not contain required metadata' });
       }
       
       const metadata = session.metadata;
-
-      console.log('Metadata recibida:', metadata);
+      console.log('Metadata received:', metadata);
 
       try {
+        // Connect to database
         await connectDB();
+        console.log('Connected to database');
 
-        // Buscar el usuario
-        let user = await User.findById(metadata.userId);
+        // Find the user first
+        const userId = metadata.userId;
+        console.log(`Looking for user: ${userId}`);
+        const user = await User.findById(userId);
         
-        // Si no encontramos el usuario, lo manejamos
         if (!user) {
-          console.warn('Usuario no encontrado:', metadata.userId);
-          console.warn('Continuando sin usuario. Generando imagen por defecto.');
-          
-          // Usar imágenes por defecto si no hay usuario
-          const raffle = await Raffle.create({
-            title: metadata.title,
-            description: metadata.description,
-            ticketPrice: parseFloat(metadata.ticketPrice),
-            totalTickets: parseInt(metadata.totalTickets),
-            socialLinks: JSON.parse(metadata.socialLinks),
-            creator: metadata.userId,
-            images: [{
-              data: 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', // GIF transparente en base64
-              contentType: 'image/gif'
-            }],
-            // Agregar una imagen por defecto para Cloudinary
-            cloudinaryImages: [DEFAULT_CLOUDINARY_IMAGE],
-            isPromoted: metadata.isPromoted === 'true',
-            status: 'active',
-            startDate: new Date(),
-            promotionEndDate: metadata.isPromoted === 'true' ? 
-              new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : // 30 días
-              undefined
-          });
-          
-          console.log('Rifa creada exitosamente sin usuario:', raffle._id);
-          return res.status(200).json({ received: true });
+          console.error(`User not found: ${userId}`);
+          return res.status(404).json({ success: false, message: 'User not found' });
         }
 
-        // Buscar las imágenes temporales del usuario
-        const userData = await User.findById(metadata.userId).lean() as unknown as UserDocument;
+        console.log(`Found user: ${user.email}`);
         
-        // Obtener imágenes de Cloudinary (principal)
-        let cloudinaryImages: CloudinaryImage[] = [];
+        // Prepare Cloudinary images array
+        let cloudinaryImages = [];
 
-        // Verificar que userData existe y tiene la propiedad cloudinaryTempImages
-        if (userData && userData.cloudinaryTempImages) {
-          const tempImages = userData.cloudinaryTempImages;
-          if (Array.isArray(tempImages) && tempImages.length > 0) {
-            cloudinaryImages = tempImages.filter((img): img is CloudinaryImage => 
-              img && 
-              typeof img === 'object' && 
-              'url' in img && 
-              'publicId' in img && 
-              typeof img.url === 'string' && 
-              typeof img.publicId === 'string'
-            );
-          }
-        }
-
-        // Si no hay imágenes de Cloudinary, buscar en el método antiguo
-        if (cloudinaryImages.length === 0) {
-          console.log('No se encontraron imágenes de Cloudinary válidas. Verificando imágenes antiguas...');
-          
-          // Intentar con imágenes antiguas (obsoleto)
-          let images: TempImage[] = [];
-          
-          try {
-            // Verificar tempRaffleImages
-            if (userData && userData.tempRaffleImages) {
-              const tempImages = userData.tempRaffleImages;
-              if (Array.isArray(tempImages) && tempImages.length > 0) {
-                console.log('Usando imágenes temporales del formato antiguo');
-                // Validar estructura de cada imagen
-                images = tempImages.filter(img => 
-                  img && 
-                  typeof img === 'object' && 
-                  'data' in img && 
-                  'contentType' in img
-                );
-              }
-            }
-            // Verificar raffleImageTemp 
-            else if (userData && userData.raffleImageTemp) {
-              const tempImages = userData.raffleImageTemp;
-              if (Array.isArray(tempImages) && tempImages.length > 0) {
-                console.log('Convirtiendo strings base64 a objetos de imagen');
-                images = tempImages
-                  .filter((dataStr: string) => typeof dataStr === 'string' && dataStr.trim() !== '')
-                  .map((dataStr: string) => ({
-                    data: dataStr,
-                    contentType: 'image/jpeg'
-                  }));
-              }
-            }
-            
-            // Si se encontraron imágenes antiguas pero no se pueden usar con Cloudinary
-            if (images.length > 0) {
-              console.log(`Se encontraron ${images.length} imágenes en formato antiguo, pero no son compatibles con Cloudinary`);
-              // Aquí se podrían convertir las imágenes antiguas a formato Cloudinary si fuera necesario
-            }
-          } catch (error) {
-            console.error('Error al procesar imágenes antiguas:', error);
-          }
-          
-          // Si no se encontraron imágenes usables, usar la imagen por defecto
-          if (cloudinaryImages.length === 0) {
-            console.log('Usando imagen por defecto de Cloudinary');
-            cloudinaryImages = [DEFAULT_CLOUDINARY_IMAGE];
-          }
-        }
-
-        console.log(`Procesando ${cloudinaryImages.length} imágenes de Cloudinary`);
-
-        // Verificar si tenemos imágenes válidas de Cloudinary
-        const validCloudinaryImages = cloudinaryImages.filter((img) => 
-          img && img.url && img.publicId
-        );
-
-        if (validCloudinaryImages.length === 0) {
-          console.error('No se encontraron imágenes de Cloudinary válidas. Usando imagen por defecto.');
-          // Imagen Cloudinary por defecto
-          cloudinaryImages = [DEFAULT_CLOUDINARY_IMAGE];
+        // Get cloudinary images from user
+        if (user.cloudinaryTempImages && user.cloudinaryTempImages.length > 0) {
+          console.log(`Using ${user.cloudinaryTempImages.length} pre-uploaded Cloudinary images`);
+          cloudinaryImages = user.cloudinaryTempImages;
         } else {
-          cloudinaryImages = validCloudinaryImages;
+          // Use default image if needed
+          console.log('No images found, using default image');
+          cloudinaryImages = [DEFAULT_CLOUDINARY_IMAGE];
         }
 
-        console.log('Procesadas correctamente', cloudinaryImages.length, 'imágenes de Cloudinary');
-        
-        // Procesar la configuración de la rifa si existe
-        let raffleConfig: RaffleConfig = {};
-        if (metadata.raffleConfig) {
-          try {
-            raffleConfig = JSON.parse(metadata.raffleConfig as string) as RaffleConfig;
-            console.log('Configuración de la rifa procesada:', raffleConfig);
-          } catch (error) {
-            console.error('Error al procesar la configuración de la rifa:', error);
-          }
+        // Parse necessary data
+        const title = metadata.title;
+        const description = metadata.description;
+        const ticketPrice = parseFloat(metadata.ticketPrice);
+        const totalTickets = parseInt(metadata.totalTickets);
+        const isPromoted = metadata.isPromoted === 'true';
+        const promotionMonths = parseInt(metadata.promotionMonths || '1');
+        const socialLinks = JSON.parse(metadata.socialLinks || '{}');
+        const raffleConfig = JSON.parse(metadata.raffleConfig || '{}');
+
+        // Validate the parsed data
+        if (isNaN(ticketPrice) || isNaN(totalTickets) || !title || !description) {
+          console.error('Invalid raffle data:', { ticketPrice, totalTickets, title, description });
+          return res.status(400).json({ success: false, message: 'Invalid raffle data in metadata' });
         }
-        
-        // Crear la rifa con los datos de la sesión y las imágenes de Cloudinary
-        const raffle = await Raffle.create({
-          title: metadata.title,
-          description: metadata.description,
-          ticketPrice: parseFloat(metadata.ticketPrice as string),
-          totalTickets: parseInt(metadata.totalTickets as string),
-          socialLinks: JSON.parse(metadata.socialLinks as string),
-          creator: metadata.userId,
+
+        // Create the raffle
+        console.log('Creating raffle with data:', { title, ticketPrice, totalTickets, promotionMonths });
+        const raffle = new Raffle({
+          title,
+          description,
+          ticketPrice,
+          totalTickets,
+          socialLinks,
+          creator: userId,
           cloudinaryImages,
-          isPromoted: metadata.isPromoted === 'true',
+          isPromoted,
           status: 'active',
           startDate: raffleConfig.startDate ? new Date(raffleConfig.startDate) : new Date(),
           endDate: raffleConfig.endDate ? new Date(raffleConfig.endDate) : undefined,
@@ -246,32 +154,35 @@ export default async function handler(
             date: raffleConfig.lotteryDate ? new Date(raffleConfig.lotteryDate) : undefined,
             drawNumber: raffleConfig.lotteryDrawNumber
           } : undefined,
-          promotionEndDate: metadata.isPromoted === 'true' ? 
-            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : // 30 días
-            undefined
+          promotionEndDate: isPromoted ? 
+            new Date(Date.now() + promotionMonths * 30 * 24 * 60 * 60 * 1000) : // Calculate based on months
+            undefined,
+          createdAt: new Date(),
+          soldTickets: []
         });
 
-        // Actualizar el usuario y limpiar las imágenes temporales
-        await User.findByIdAndUpdate(metadata.userId, {
-          $push: { createdRaffles: raffle._id },
-          $set: { 
-            raffleImageTemp: [],
-            tempRaffleImages: [],
-            cloudinaryTempImages: []
-          }
+        // Save the raffle
+        const savedRaffle = await raffle.save();
+        console.log(`Raffle created successfully: ${savedRaffle._id}`);
+
+        // Update user's createdRaffles array
+        await User.findByIdAndUpdate(userId, {
+          $push: { createdRaffles: savedRaffle._id },
+          $set: { cloudinaryTempImages: [] } // Clear temp images
         });
         
-        console.log('Rifa creada exitosamente:', raffle._id);
+        console.log(`Updated user's createdRaffles array`);
         
+        return res.status(200).json({ received: true });
       } catch (error) {
-        console.error('Error detallado en el procesamiento del webhook:', error);
-        return res.status(500).json({ message: 'Error al procesar el webhook' });
+        console.error('Error processing webhook:', error);
+        return res.status(500).json({ message: 'Error processing webhook' });
       }
     }
 
     return res.status(200).json({ received: true });
   } catch (error) {
-    console.error('Error al procesar webhook:', error);
-    return res.status(500).json({ message: 'Error al procesar webhook' });
+    console.error('Error processing webhook:', error);
+    return res.status(500).json({ message: 'Error processing webhook' });
   }
 }

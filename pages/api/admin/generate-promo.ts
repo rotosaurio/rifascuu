@@ -1,8 +1,8 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../auth/[...nextauth]';
-import connectDB from '../../../lib/mongodb';
-import User from '../../../models/User';
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth"; // Fixed import path
+import connectDB from '@/lib/mongodb';
+import User from '@/models/User';
 
 // Generate a random alphanumeric code
 function generatePromoCode(length: number = 8): string {
