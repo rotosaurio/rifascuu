@@ -12,7 +12,7 @@ interface SoldTicket {
 }
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2022-11-15',
+  apiVersion: '2023-10-16',
 });
 
 export default async function handler(
@@ -88,4 +88,4 @@ export default async function handler(
     console.error('Error al verificar compra:', error);
     res.status(500).json({ message: 'Error al verificar la compra' });
   }
-} 
+}
